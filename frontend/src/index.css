@@ -1,103 +1,110 @@
 @import "tailwindcss";
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
+/* 
+  🌈 Tailwind v4: Design System Definition 
+  Define all theme tokens (colors, radii, etc.) inside @theme.
+  This replaces theme.extend in tailwind.config.js.
 */
 
+@theme {
+  /* Base design tokens (light mode) */
+  --color-background: hsl(0 0% 100%);
+  --color-foreground: hsl(222 47% 11%);
+
+  --color-card: hsl(0 0% 100%);
+  --color-card-foreground: hsl(222 47% 11%);
+
+  --color-popover: hsl(0 0% 100%);
+  --color-popover-foreground: hsl(222 47% 11%);
+
+  --color-primary: hsl(217 91% 60%);
+  --color-primary-foreground: hsl(0 0% 100%);
+
+  --color-secondary: hsl(214 32% 91%);
+  --color-secondary-foreground: hsl(222 47% 11%);
+
+  --color-muted: hsl(210 40% 96%);
+  --color-muted-foreground: hsl(215 16% 47%);
+
+  --color-accent: hsl(187 80% 50%);
+  --color-accent-foreground: hsl(0 0% 100%);
+
+  --color-destructive: hsl(0 84% 60%);
+  --color-destructive-foreground: hsl(0 0% 100%);
+
+  --color-border: hsl(214 32% 91%);
+  --color-input: hsl(214 32% 91%);
+  --color-ring: hsl(217 91% 60%);
+
+  --radius-base: 0.5rem;
+
+  /* Charts */
+  --color-chart-1: hsl(217 91% 60%);
+  --color-chart-2: hsl(187 80% 50%);
+  --color-chart-3: hsl(142 71% 45%);
+  --color-chart-4: hsl(38 92% 50%);
+  --color-chart-5: hsl(340 82% 52%);
+
+  /* Sidebar */
+  --color-sidebar-background: hsl(0 0% 98%);
+  --color-sidebar-foreground: hsl(240 5% 26%);
+  --color-sidebar-primary: hsl(217 91% 60%);
+  --color-sidebar-primary-foreground: hsl(0 0% 100%);
+  --color-sidebar-accent: hsl(214 32% 91%);
+  --color-sidebar-accent-foreground: hsl(222 47% 11%);
+  --color-sidebar-border: hsl(220 13% 91%);
+  --color-sidebar-ring: hsl(217 91% 60%);
+}
+
+/* 🌙 Dark mode overrides */
 @layer base {
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-
-    --primary: 217 91% 60%;
-    --primary-foreground: 0 0% 100%;
-
-    --secondary: 214 32% 91%;
-    --secondary-foreground: 222 47% 11%;
-
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-
-    --accent: 187 80% 50%;
-    --accent-foreground: 0 0% 100%;
-
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 217 91% 60%;
-
-    --radius: 0.5rem;
-
-    --chart-1: 217 91% 60%;
-    --chart-2: 187 80% 50%;
-    --chart-3: 142 71% 45%;
-    --chart-4: 38 92% 50%;
-    --chart-5: 340 82% 52%;
-
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5% 26%;
-    --sidebar-primary: 217 91% 60%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 214 32% 91%;
-    --sidebar-accent-foreground: 222 47% 11%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217 91% 60%;
-  }
-
   .dark {
-    --background: 222 47% 11%;
-    --foreground: 210 40% 98%;
+    --color-background: hsl(222 47% 11%);
+    --color-foreground: hsl(210 40% 98%);
 
-    --card: 222 47% 11%;
-    --card-foreground: 210 40% 98%;
+    --color-card: hsl(222 47% 11%);
+    --color-card-foreground: hsl(210 40% 98%);
 
-    --popover: 222 47% 11%;
-    --popover-foreground: 210 40% 98%;
+    --color-popover: hsl(222 47% 11%);
+    --color-popover-foreground: hsl(210 40% 98%);
 
-    --primary: 217 91% 60%;
-    --primary-foreground: 0 0% 100%;
+    --color-primary: hsl(217 91% 60%);
+    --color-primary-foreground: hsl(0 0% 100%);
 
-    --secondary: 217 33% 18%;
-    --secondary-foreground: 210 40% 98%;
+    --color-secondary: hsl(217 33% 18%);
+    --color-secondary-foreground: hsl(210 40% 98%);
 
-    --muted: 217 33% 18%;
-    --muted-foreground: 215 20% 65%;
+    --color-muted: hsl(217 33% 18%);
+    --color-muted-foreground: hsl(215 20% 65%);
 
-    --accent: 187 80% 50%;
-    --accent-foreground: 0 0% 100%;
+    --color-accent: hsl(187 80% 50%);
+    --color-accent-foreground: hsl(0 0% 100%);
 
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 210 40% 98%;
+    --color-destructive: hsl(0 63% 31%);
+    --color-destructive-foreground: hsl(210 40% 98%);
 
-    --border: 217 33% 18%;
-    --input: 217 33% 18%;
-    --ring: 217 91% 60%;
+    --color-border: hsl(217 33% 18%);
+    --color-input: hsl(217 33% 18%);
+    --color-ring: hsl(217 91% 60%);
 
-    --chart-1: 217 91% 60%;
-    --chart-2: 187 80% 50%;
-    --chart-3: 142 71% 45%;
-    --chart-4: 38 92% 50%;
-    --chart-5: 340 82% 52%;
+    --color-chart-1: hsl(217 91% 60%);
+    --color-chart-2: hsl(187 80% 50%);
+    --color-chart-3: hsl(142 71% 45%);
+    --color-chart-4: hsl(38 92% 50%);
+    --color-chart-5: hsl(340 82% 52%);
 
-    --sidebar-background: 222 47% 11%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 217 91% 60%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 217 33% 18%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 217 33% 18%;
-    --sidebar-ring: 217 91% 60%;
+    --color-sidebar-background: hsl(222 47% 11%);
+    --color-sidebar-foreground: hsl(210 40% 98%);
+    --color-sidebar-primary: hsl(217 91% 60%);
+    --color-sidebar-primary-foreground: hsl(0 0% 100%);
+    --color-sidebar-accent: hsl(217 33% 18%);
+    --color-sidebar-accent-foreground: hsl(210 40% 98%);
+    --color-sidebar-border: hsl(217 33% 18%);
+    --color-sidebar-ring: hsl(217 91% 60%);
   }
 }
 
+/* 🧱 Base styles */
 @layer base {
   * {
     @apply border-border;
