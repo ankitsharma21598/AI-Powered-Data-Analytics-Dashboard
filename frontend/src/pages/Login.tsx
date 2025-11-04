@@ -14,28 +14,39 @@ import {
 } from "@/components/ui/card";
 import { toast } from "sonner";
 import { BarChart3 } from "lucide-react";
+import { login } from "@/store/slices/authSlice";
+import { useDispatch } from "react-redux";
+import { AppDispatch } from "@/store/store";
+import { setToken } from "@/lib/api";
 
 export default function Login() {
+  const dispatch = useDispatch<AppDispatch>();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   //   const { login } = useAuth();
   const navigate = useNavigate();
 
-  //   const handleSubmit = async (e: React.FormEvent) => {
-  //     e.preventDefault();
-  //     setLoading(true);
+  const handleSubmit = async (e: React.FormEvent) => {
+    console.log("Inside handle submit......");
 
-  //     try {
-  //       await login(email, password);
-  //       toast.success("Welcome back!");
-  //       navigate("/dashboard");
-  //     } catch (error: any) {
-  //       toast.error(error.message || "Failed to login");
-  //     } finally {
-  //       setLoading(false);
-  //     }
-  //   };
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      const response = await dispatch(login({ email, password })).unwrap();
+      // store token in localStorage
+      // console.log("Login response===>", response);
+      setToken(response.token);
+
+      toast.success("Welcome back!");
+      navigate("/dashboard");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to login");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
@@ -51,7 +62,7 @@ export default function Login() {
             Sign in to your DataInsight AI account
           </CardDescription>
         </CardHeader>
-        <form>
+        <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>

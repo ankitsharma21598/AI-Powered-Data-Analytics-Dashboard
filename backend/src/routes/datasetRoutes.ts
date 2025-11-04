@@ -19,8 +19,9 @@ const router = express.Router();
 router.use(protect);
 
 // Dataset listing and retrieval
-router.get("/", getDataset);
+// router.get("/", getDataset);
 router.get("/:id", getDataset);
+router.get("/", getDatasets);
 
 // Dataset operations
 router.put("/:id", updateDataset);

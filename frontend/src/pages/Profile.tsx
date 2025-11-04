@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { use, useEffect, useState } from "react";
 import { Layout } from "@/components/Layout";
 // import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -14,17 +14,43 @@ import {
 import { authApi } from "@/lib/api";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { AppDispatch } from "@/store/store";
+import { useDispatch, useSelector } from "react-redux";
+import { getProfile } from "@/store/slices/authSlice";
 
 export default function Profile() {
-  //   const { user, updateUser } = useAuth();
-  const user = { name: "John Doe", email: "B0mYg@example.com", avatar: "" };
-  const updateUser = () => {};
-  const [name, setName] = useState(user?.name || "");
-  const [email, setEmail] = useState(user?.email || "");
+  const dispatch = useDispatch<AppDispatch>();
+  const user = useSelector((state: any) => state.auth.user);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // 🧩 1️⃣ Fetch user profile once on mount
+  useEffect(() => {
+    const fetchUser = async () => {
+      setLoading(true);
+      try {
+        await dispatch(getProfile()).unwrap();
+      } catch (error) {
+        console.error("Failed to fetch profile:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUser();
+  }, [dispatch]);
+
+  // 🧩 2️⃣ Sync local state when user data changes
+  useEffect(() => {
+    if (user) {
+      setName(user.name ?? "");
+      setEmail(user.email ?? "");
+    }
+  }, [user]);
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();

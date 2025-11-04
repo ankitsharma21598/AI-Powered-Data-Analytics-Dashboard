@@ -7,9 +7,11 @@ import userRoutes from "./routes/userRoutes.js";
 import insightRoutes from "./routes/insightRoutes.js";
 import datasetRoutes from "./routes/datasetRoutes.js";
 import uploadRoutes from "./routes/uploadRoutes.js";
+import cors from "cors";
 dotenv.config();
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 app.get("/", (req: Request, res: Response) => {
@@ -22,6 +24,12 @@ app.use("/api/user", userRoutes);
 app.use("/api/insights", insightRoutes);
 app.use("/api/datasets", datasetRoutes);
 app.use("/api/upload", uploadRoutes);
+
+// origin for frontend
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://ai-powered-data-analysis-dashboard.vercel.app",
+];
 
 mongoose
   .connect(process.env.MONGO_URI || "")

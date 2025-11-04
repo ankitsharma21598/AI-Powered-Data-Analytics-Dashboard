@@ -1,6 +1,6 @@
 import { AuthResponse, User, Dataset, Insight, ApiResponse } from "@/types/api";
 
-const API_BASE_URL = "http://localhost:5000/api";
+const API_BASE_URL = "http://localhost:4000/api";
 
 // Get token from localStorage
 const getToken = () => localStorage.getItem("token");
@@ -53,18 +53,22 @@ async function fetchApi<T>(
 // Auth API
 export const authApi = {
   register: (name: string, email: string, password: string) =>
-    fetchApi<AuthResponse["data"]>("/users/register", {
+    fetchApi<AuthResponse["data"]>("/user/register", {
       method: "POST",
       body: JSON.stringify({ name, email, password }),
     }),
 
   login: (email: string, password: string) =>
-    fetchApi<AuthResponse["data"]>("/users/login", {
+    fetchApi<AuthResponse["data"]>("/user/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
 
-  getProfile: () => fetchApi<User>("/users/profile"),
+  getProfile: () =>
+    fetchApi<User>("/user/profile", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${getToken()}` },
+    }),
 
   updateProfile: (data: Partial<User>) =>
     fetchApi<User>("/users/profile", {
@@ -194,7 +198,12 @@ export const insightApi = {
 
 // Upload API
 export const uploadApi = {
-  upload: (file: File, name?: string, description?: string, tags?: string[]) => {
+  upload: (
+    file: File,
+    name?: string,
+    description?: string,
+    tags?: string[]
+  ) => {
     const formData = new FormData();
     formData.append("file", file);
     if (name) formData.append("name", name);

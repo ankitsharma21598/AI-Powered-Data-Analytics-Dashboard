@@ -1,5 +1,4 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-// import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,13 +17,21 @@ import {
   User,
   Menu,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import { AppDispatch, RootState } from "@/store/store";
+import { getProfile } from "@/store/slices/authSlice";
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  //   const { user, logout } = useAuth({});
-  const user = { name: "John Doe", email: "B0mYg@example.com", avatar: "" };
+  const dispatch = useDispatch<AppDispatch>();
+  const user = useSelector((state: RootState) => state.auth.user);
+
+  useEffect(() => {
+    dispatch(getProfile()).unwrap();
+  }, [dispatch]);
+
   const logout = () => {};
   const location = useLocation();
   const navigate = useNavigate();
