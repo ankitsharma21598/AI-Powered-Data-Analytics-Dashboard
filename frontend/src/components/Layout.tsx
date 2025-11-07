@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { AppDispatch, RootState } from "@/store/store";
 import { getProfile } from "@/store/slices/authSlice";
+import { removeToken } from "@/lib/api";
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -32,7 +33,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({
     dispatch(getProfile()).unwrap();
   }, [dispatch]);
 
-  const logout = () => {};
+  const logout = () => {
+    removeToken();
+    navigate("/login");
+  };
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -53,7 +57,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 flex justify-center ">
         <div className="container flex h-16 items-center justify-between">
           <div className="flex items-center gap-6">
             <Link to="/dashboard" className="flex items-center gap-2">
@@ -159,7 +163,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({
       </header>
 
       {/* Main Content */}
-      <main className="container py-6">{children}</main>
+      <main className="container py-6 mx-auto">{children}</main>
     </div>
   );
 };

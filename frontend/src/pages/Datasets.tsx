@@ -2,12 +2,26 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { datasetApi, uploadApi } from "@/lib/api";
-import { Upload, Search, Database, Trash2, Download, Eye } from "lucide-react";
+import { Upload, Search, Database, Trash2, Download, Eye, FileText, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +38,8 @@ export default function Datasets() {
   const [file, setFile] = useState<File | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [datasetToDelete, setDatasetToDelete] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -53,9 +69,22 @@ export default function Datasets() {
     onSuccess: () => {
       toast.success("Dataset deleted successfully!");
       queryClient.invalidateQueries({ queryKey: ["datasets"] });
+      setDeleteDialogOpen(false);
+      setDatasetToDelete(null);
     },
     onError: (error: any) => {
       toast.error(error.message || "Failed to delete dataset");
+    },
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: (id: string) => datasetApi.duplicate(id),
+    onSuccess: () => {
+      toast.success("Dataset duplicated successfully!");
+      queryClient.invalidateQueries({ queryKey: ["datasets"] });
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Failed to duplicate dataset");
     },
   });
 
@@ -147,9 +176,27 @@ export default function Datasets() {
 
         {/* Datasets Grid */}
         {isLoading ? (
-          <div className="text-center py-12">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading datasets...</p>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {[...Array(6)].map((_, i) => (
+              <Card key={i}>
+                <CardHeader>
+                  <Skeleton className="h-6 w-2/3" />
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Skeleton className="h-4 w-full" />
+                  <div className="flex gap-2">
+                    <Skeleton className="h-6 w-16" />
+                    <Skeleton className="h-6 w-16" />
+                    <Skeleton className="h-6 w-16" />
+                  </div>
+                  <div className="flex gap-2">
+                    <Skeleton className="h-9 flex-1" />
+                    <Skeleton className="h-9 w-9" />
+                    <Skeleton className="h-9 w-9" />
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         ) : datasets.length === 0 ? (
           <Card className="border-dashed">
@@ -159,10 +206,7 @@ export default function Datasets() {
               <p className="text-muted-foreground mb-4 text-center">
                 Upload your first dataset to start analyzing data
               </p>
-              <Button
-                onClick={() => setUploadDialogOpen(true)}
-                className="gap-2"
-              >
+              <Button onClick={() => setUploadDialogOpen(true)} className="gap-2">
                 <Upload className="h-4 w-4" />
                 Upload Dataset
               </Button>
@@ -171,81 +215,142 @@ export default function Datasets() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {datasets.map((dataset) => (
-              <Card
-                key={dataset._id}
-                className="hover:shadow-lg transition-shadow"
-              >
+              <Card key={dataset._id} className="hover:shadow-lg transition-all group">
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between">
-                    <span className="truncate">{dataset.name}</span>
-                    <span
-                      className={`text-xs px-2 py-1 rounded-full ${
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="truncate">{dataset.name}</span>
+                      </TooltipTrigger>
+                      <TooltipContent>{dataset.name}</TooltipContent>
+                    </Tooltip>
+                    <Badge
+                      variant={
                         dataset.metadata.processingStatus === "completed"
-                          ? "bg-chart-3/10 text-chart-3"
+                          ? "default"
                           : dataset.metadata.processingStatus === "processing"
-                          ? "bg-chart-4/10 text-chart-4"
+                          ? "secondary"
                           : dataset.metadata.processingStatus === "failed"
-                          ? "bg-destructive/10 text-destructive"
-                          : "bg-muted text-muted-foreground"
-                      }`}
+                          ? "destructive"
+                          : "outline"
+                      }
                     >
                       {dataset.metadata.processingStatus}
-                    </span>
+                    </Badge>
                   </CardTitle>
+                  <CardDescription className="line-clamp-2">
+                    {dataset.description || "No description provided"}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <p className="text-sm text-muted-foreground line-clamp-2">
-                    {dataset.description || "No description"}
-                  </p>
+                  {dataset.metadata.processingStatus === "processing" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Processing...</span>
+                      </div>
+                      <Progress value={50} className="h-1" />
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-2">
-                    <span className="text-xs px-2 py-1 rounded-full bg-muted">
-                      {dataset.rowCount} rows
-                    </span>
-                    <span className="text-xs px-2 py-1 rounded-full bg-muted">
-                      {dataset.columns.length} columns
-                    </span>
-                    <span className="text-xs px-2 py-1 rounded-full bg-muted capitalize">
+                    <Badge variant="outline" className="gap-1">
+                      <FileText className="h-3 w-3" />
+                      {dataset.rowCount.toLocaleString()} rows
+                    </Badge>
+                    <Badge variant="outline" className="gap-1">
+                      <Database className="h-3 w-3" />
+                      {dataset.columns.length} cols
+                    </Badge>
+                    <Badge variant="outline" className="capitalize gap-1">
                       {dataset.fileType}
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-1 gap-2"
-                      onClick={() => navigate(`/datasets/${dataset._id}`)}
-                    >
-                      <Eye className="h-4 w-4" />
-                      View
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => datasetApi.download(dataset._id)}
-                    >
-                      <Download className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        if (
-                          confirm(
-                            "Are you sure you want to delete this dataset?"
-                          )
-                        ) {
-                          deleteMutation.mutate(dataset._id);
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    </Badge>
                   </div>
                 </CardContent>
+                <CardFooter className="flex gap-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 gap-2"
+                        onClick={() => navigate(`/datasets/${dataset._id}`)}
+                      >
+                        <Eye className="h-4 w-4" />
+                        View
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>View dataset details</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => duplicateMutation.mutate(dataset._id)}
+                        disabled={duplicateMutation.isPending}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Duplicate dataset</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => datasetApi.download(dataset._id)}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Download dataset</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setDatasetToDelete(dataset._id);
+                          setDeleteDialogOpen(true);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete dataset</TooltipContent>
+                  </Tooltip>
+                </CardFooter>
               </Card>
             ))}
           </div>
         )}
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the dataset
+                and all associated insights.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (datasetToDelete) {
+                    deleteMutation.mutate(datasetToDelete);
+                  }
+                }}
+                className="bg-destructive hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </Layout>
   );

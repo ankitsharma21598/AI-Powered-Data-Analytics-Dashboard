@@ -2,12 +2,45 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardFooter,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { insightApi, datasetApi } from "@/lib/api";
-import { Lightbulb, Search, Sparkles, Trash2, Eye } from "lucide-react";
+import {
+  Lightbulb,
+  Search,
+  Sparkles,
+  Trash2,
+  Eye,
+  Copy,
+  TrendingUp,
+  BarChart,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +64,8 @@ export default function Insights() {
   const [selectedDataset, setSelectedDataset] = useState("");
   const [query, setQuery] = useState("");
   const [insightType, setInsightType] = useState("trend");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [insightToDelete, setInsightToDelete] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -64,9 +99,22 @@ export default function Insights() {
     onSuccess: () => {
       toast.success("Insight deleted successfully!");
       queryClient.invalidateQueries({ queryKey: ["insights"] });
+      setDeleteDialogOpen(false);
+      setInsightToDelete(null);
     },
     onError: (error: any) => {
       toast.error(error.message || "Failed to delete insight");
+    },
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: (id: string) => insightApi.duplicate(id),
+    onSuccess: () => {
+      toast.success("Insight duplicated successfully!");
+      queryClient.invalidateQueries({ queryKey: ["insights"] });
+    },
+    onError: (error: any) => {
+      toast.error(error.message || "Failed to duplicate insight");
     },
   });
 
@@ -96,7 +144,10 @@ export default function Insights() {
               AI-powered insights from your data
             </p>
           </div>
-          <Dialog open={generateDialogOpen} onOpenChange={setGenerateDialogOpen}>
+          <Dialog
+            open={generateDialogOpen}
+            onOpenChange={setGenerateDialogOpen}
+          >
             <DialogTrigger asChild>
               <Button className="gap-2">
                 <Sparkles className="h-4 w-4" />
@@ -113,13 +164,18 @@ export default function Insights() {
               <div className="space-y-4 mt-4">
                 <div className="space-y-2">
                   <Label htmlFor="dataset">Select Dataset *</Label>
-                  <Select value={selectedDataset} onValueChange={setSelectedDataset}>
+                  <Select
+                    value={selectedDataset}
+                    onValueChange={setSelectedDataset}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Choose a dataset" />
                     </SelectTrigger>
                     <SelectContent>
                       {datasets
-                        .filter((d) => d.metadata.processingStatus === "completed")
+                        .filter(
+                          (d) => d.metadata.processingStatus === "completed"
+                        )
                         .map((dataset) => (
                           <SelectItem key={dataset._id} value={dataset._id}>
                             {dataset.name}
@@ -157,7 +213,9 @@ export default function Insights() {
                   className="w-full"
                   disabled={generateMutation.isPending || !selectedDataset}
                 >
-                  {generateMutation.isPending ? "Generating..." : "Generate Insight"}
+                  {generateMutation.isPending
+                    ? "Generating..."
+                    : "Generate Insight"}
                 </Button>
               </div>
             </DialogContent>
@@ -177,9 +235,26 @@ export default function Insights() {
 
         {/* Insights Grid */}
         {isLoading ? (
-          <div className="text-center py-12">
-            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading insights...</p>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {[...Array(6)].map((_, i) => (
+              <Card key={i}>
+                <CardHeader>
+                  <Skeleton className="h-6 w-2/3" />
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-4/5" />
+                  <div className="flex gap-2">
+                    <Skeleton className="h-6 w-16" />
+                    <Skeleton className="h-6 w-20" />
+                  </div>
+                  <div className="flex gap-2">
+                    <Skeleton className="h-9 flex-1" />
+                    <Skeleton className="h-9 w-9" />
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         ) : insights.length === 0 ? (
           <Card className="border-dashed">
@@ -187,9 +262,13 @@ export default function Insights() {
               <Lightbulb className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No insights yet</h3>
               <p className="text-muted-foreground mb-4 text-center">
-                Generate AI insights from your datasets to discover trends and patterns
+                Generate AI insights from your datasets to discover trends and
+                patterns
               </p>
-              <Button onClick={() => setGenerateDialogOpen(true)} className="gap-2">
+              <Button
+                onClick={() => setGenerateDialogOpen(true)}
+                className="gap-2"
+              >
                 <Sparkles className="h-4 w-4" />
                 Generate AI Insight
               </Button>
@@ -198,59 +277,129 @@ export default function Insights() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {insights.map((insight) => (
-              <Card key={insight._id} className="hover:shadow-lg transition-shadow">
+              <Card
+                key={insight._id}
+                className="hover:shadow-lg transition-all group"
+              >
                 <CardHeader>
                   <CardTitle className="flex items-center justify-between">
-                    <span className="truncate">{insight.title}</span>
-                    {insight.aiGenerated && (
-                      <Sparkles className="h-4 w-4 text-accent" />
-                    )}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="truncate flex items-center gap-2">
+                          {insight.title}
+                          {insight.aiGenerated && (
+                            <Sparkles className="h-4 w-4 text-accent flex-shrink-0" />
+                          )}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{insight.title}</TooltipContent>
+                    </Tooltip>
                   </CardTitle>
+                  <CardDescription className="line-clamp-2">
+                    {insight.description}
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <p className="text-sm text-muted-foreground line-clamp-3">
-                    {insight.description}
-                  </p>
                   <div className="flex flex-wrap gap-2">
-                    <span className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary capitalize">
+                    <Badge variant="secondary" className="capitalize gap-1">
+                      <TrendingUp className="h-3 w-3" />
                       {insight.type}
-                    </span>
+                    </Badge>
                     {insight.confidence && (
-                      <span className="text-xs px-2 py-1 rounded-full bg-muted">
+                      <Badge variant="outline">
                         {Math.round(insight.confidence * 100)}% confidence
-                      </span>
+                      </Badge>
                     )}
-                    <span className="text-xs px-2 py-1 rounded-full bg-muted">
-                      {insight.visualizations.length} charts
-                    </span>
+                    {insight.visualizations.length > 0 && (
+                      <Badge variant="outline" className="gap-1">
+                        <BarChart className="h-3 w-3" />
+                        {insight.visualizations.length}
+                      </Badge>
+                    )}
                   </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-1 gap-2"
-                      onClick={() => navigate(`/insights/${insight._id}`)}
-                    >
-                      <Eye className="h-4 w-4" />
-                      View Details
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        if (confirm("Are you sure you want to delete this insight?")) {
-                          deleteMutation.mutate(insight._id);
-                        }
-                      }}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
+                  {insight.metrics && insight.metrics.length > 0 && (
+                    <div className="text-sm text-muted-foreground">
+                      <span className="font-medium">
+                        {insight.metrics.length}
+                      </span>{" "}
+                      key metrics
+                    </div>
+                  )}
                 </CardContent>
+                <CardFooter className="flex gap-2">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-1 gap-2"
+                        onClick={() => navigate(`/insights/${insight._id}`)}
+                      >
+                        <Eye className="h-4 w-4" />
+                        View
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>View insight details</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => duplicateMutation.mutate(insight._id)}
+                        disabled={duplicateMutation.isPending}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Duplicate insight</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setInsightToDelete(insight._id);
+                          setDeleteDialogOpen(true);
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete insight</TooltipContent>
+                  </Tooltip>
+                </CardFooter>
               </Card>
             ))}
           </div>
         )}
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Insight?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the
+                insight.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (insightToDelete) {
+                    deleteMutation.mutate(insightToDelete);
+                  }
+                }}
+                className="bg-destructive hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </Layout>
   );

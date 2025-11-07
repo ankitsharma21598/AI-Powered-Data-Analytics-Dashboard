@@ -9,24 +9,74 @@ import Datasets from "./pages/Datasets";
 import Insights from "./pages/Insights";
 import { Provider } from "react-redux";
 import { store } from "./store/store";
+import DatasetDetail from "./pages/DatasetDetail";
+import InsightDetail from "./pages/InsightDetail";
+import { TooltipProvider } from "./components/ui/tooltip";
+import { ProtectedRoute } from "./components/ProtectedRoute";
 
 const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     {/* Your app components go here */}
     <Provider store={store}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/datasets" element={<Datasets />} />
-          <Route path="/insights" element={<Insights />} />
-          <Route path="/profile" element={<Profile />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <TooltipProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/datasets"
+              element={
+                <ProtectedRoute>
+                  <Datasets />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/datasets/:id"
+              element={
+                <ProtectedRoute>
+                  <DatasetDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/insights"
+              element={
+                <ProtectedRoute>
+                  <Insights />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/insights/:id"
+              element={
+                <ProtectedRoute>
+                  <InsightDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
     </Provider>
   </QueryClientProvider>
 );
