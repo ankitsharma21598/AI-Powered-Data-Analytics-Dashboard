@@ -1,6 +1,6 @@
-import { type Response, type NextFunction } from "express";
+import { Response, NextFunction } from "express";
 import Dataset from "../models/Dataset.js";
-import { type AuthRequest } from "../middleware/auth.js";
+import { AuthRequest } from "../middleware/auth.js";
 import { CustomError } from "../middleware/errorHandler.js";
 import path from "path";
 import fs from "fs/promises";
@@ -11,12 +11,8 @@ import {
   uploadToCloudinary,
   downloadFromCloudinary,
   isCloudinaryConfigured,
-  extractPublicId,
+  deleteFromCloudinary,
 } from "../services/cloudinaryService.js";
-import { log } from "console";
-
-// Determine storage type from environment
-const STORAGE_TYPE = process.env.STORAGE_TYPE || "local"; // 'local', 'gcs', or 'cloudinary'
 
 // @desc    Upload file and create dataset
 // @route   POST /api/upload
@@ -31,6 +27,14 @@ export const uploadFile = async (
       throw new CustomError("Please upload a file", 400);
     }
 
+    // Check if Cloudinary is configured
+    if (!isCloudinaryConfigured()) {
+      throw new CustomError(
+        "Cloud storage is not configured. Please contact administrator.",
+        500
+      );
+    }
+
     const { name, description, tags } = req.body;
 
     // Determine file type
@@ -40,6 +44,15 @@ export const uploadFile = async (
     if (ext === ".csv") fileType = "csv";
     else if (ext === ".json") fileType = "json";
     else if (ext === ".xlsx" || ext === ".xls") fileType = "excel";
+
+    // Validate file type
+    if (fileType === "other") {
+      await fs.unlink(req.file.path);
+      throw new CustomError(
+        "Invalid file type. Only CSV, JSON, and Excel files are supported.",
+        400
+      );
+    }
 
     // Parse tags
     let parsedTags: string[] = [];
@@ -51,44 +64,31 @@ export const uploadFile = async (
       }
     }
 
-    let fileUrl = `/uploads/${req.file.filename}`;
-    let cloudPath = "";
-    let storageType: "local" | "gcs" | "cloudinary" = "local";
-
-    console.log(`🔍 Selected storage type: ${STORAGE_TYPE}`);
-    console.log(`🔍 Cloudinary configured: ${isCloudinaryConfigured()}`);
+    console.log(`📤 Uploading file to Cloudinary: ${req.file.originalname}`);
 
     // Upload to Cloudinary
-    if (STORAGE_TYPE === "cloudinary" && isCloudinaryConfigured()) {
-      try {
-        const result = await uploadToCloudinary(req.file.path, {
-          userId: req.user?.id.toString(),
-          publicId: `${Date.now()}-${path.parse(req.file.originalname).name}`,
-          resourceType: "raw",
-        });
+    const result = await uploadToCloudinary(req.file.path, {
+      userId: req.user?.id.toString(),
+      publicId: `${Date.now()}-${path.parse(req.file.originalname).name}`,
+      resourceType: "raw",
+      tags: parsedTags,
+    });
 
-        fileUrl = result.secure_url;
-        cloudPath = result.public_id;
-        storageType = "cloudinary";
+    console.log(`✅ File uploaded successfully to Cloudinary`);
+    console.log(`   Public ID: ${result.public_id}`);
+    console.log(`   Secure URL: ${result.secure_url}`);
 
-        console.log(`✅ File uploaded to Cloudinary: ${cloudPath}`);
+    // Delete local temp file immediately after successful upload
+    await fs
+      .unlink(req.file.path)
+      .catch((err) => console.error("Error deleting temp file:", err));
 
-        // Delete local file after successful upload
-        await fs.unlink(req.file.path).catch(console.error);
-      } catch (cloudinaryError) {
-        console.error(
-          "Cloudinary upload failed, falling back to local storage:",
-          cloudinaryError
-        );
-      }
-    }
-
-    // Create dataset record
+    // Create dataset record in database
     const dataset = await Dataset.create({
       userId: req.user?._id,
       name: name || req.file.originalname,
       description: description || "",
-      fileUrl: fileUrl,
+      fileUrl: result.secure_url,
       fileName: req.file.originalname,
       fileSize: req.file.size,
       fileType,
@@ -99,33 +99,29 @@ export const uploadFile = async (
         uploadDate: new Date(),
         lastModified: new Date(),
         processingStatus: "pending",
-        storageType: storageType,
-        cloudPath: cloudPath || undefined,
+        storageType: "cloudinary",
+        cloudPath: result.public_id,
       },
     });
 
-    // Start processing in background
-    const processingPath = cloudPath || req.file.path;
+    // Start background processing
     processFileAsync(
       dataset.id.toString(),
-      processingPath,
-      fileType,
-      storageType
-    ).catch((error) => console.error("Background processing error:", error));
-
-    const storageTypeMap = {
-      cloudinary: "Cloudinary",
-      gcs: "Google Cloud Storage",
-      local: "local storage",
-    };
+      result.secure_url,
+      result.public_id,
+      fileType
+    ).catch((error) => {
+      console.error("Background processing error:", error);
+    });
 
     res.status(201).json({
       success: true,
       data: dataset,
-      message: `File uploaded successfully to ${storageTypeMap[storageType]}. Processing will begin shortly.`,
+      message:
+        "File uploaded successfully to cloud storage. Processing will begin shortly.",
     });
   } catch (error) {
-    // Clean up uploaded file if dataset creation fails
+    // Clean up temp file if upload fails
     if (req.file) {
       await fs.unlink(req.file.path).catch(console.error);
     }
@@ -155,23 +151,24 @@ export const processFile = async (
       throw new CustomError("Dataset is already being processed", 400);
     }
 
+    const cloudPath = (dataset.metadata as any).cloudPath;
+    if (!cloudPath) {
+      throw new CustomError("Cloud path not found for dataset", 500);
+    }
+
     // Update processing status
     dataset.metadata.processingStatus = "processing";
     await dataset.save();
 
-    const storageType = (dataset.metadata as any).storageType || "local";
-    const filePath =
-      storageType !== "local"
-        ? (dataset.metadata as any).cloudPath
-        : path.join(process.cwd(), dataset.fileUrl);
-
-    // Process file in background
+    // Start processing in background
     processFileAsync(
       dataset.id.toString(),
-      filePath,
-      dataset.fileType,
-      storageType
-    ).catch((error) => console.error("Processing error:", error));
+      dataset.fileUrl,
+      cloudPath,
+      dataset.fileType
+    ).catch((error) => {
+      console.error("Processing error:", error);
+    });
 
     res.status(200).json({
       success: true,
@@ -211,7 +208,7 @@ export const getUploadStatus = async (
         status: dataset.metadata.processingStatus,
         errorMessage: dataset.metadata.errorMessage,
         lastModified: dataset.metadata.lastModified,
-        storageType: (dataset.metadata as any).storageType || "local",
+        storageType: "cloudinary",
       },
     });
   } catch (error) {
@@ -243,7 +240,7 @@ export const validateFile = async (
       );
     }
 
-    const maxSize = parseInt(process.env.MAX_FILE_SIZE || "10485760");
+    const maxSize = parseInt(process.env.MAX_FILE_SIZE || "10485760"); // 10MB
     if (req.file.size > maxSize) {
       await fs.unlink(req.file.path);
       throw new CustomError(
@@ -252,6 +249,7 @@ export const validateFile = async (
       );
     }
 
+    // Clean up temp file after validation
     await fs.unlink(req.file.path);
 
     res.status(200).json({
@@ -260,6 +258,7 @@ export const validateFile = async (
       data: {
         fileName: req.file.originalname,
         fileSize: req.file.size,
+        fileSizeFormatted: formatBytes(req.file.size),
         fileType: ext.substring(1),
       },
     });
@@ -268,34 +267,42 @@ export const validateFile = async (
   }
 };
 
-// Background file processing function
+// ============================================
+// Background Processing Functions
+// ============================================
+
+/**
+ * Process file in background
+ */
 async function processFileAsync(
   datasetId: string,
-  filePath: string,
-  fileType: string,
-  storageType: string = "local"
+  fileUrl: string,
+  publicId: string,
+  fileType: string
 ): Promise<void> {
-  let localPath = filePath;
-  let tempFile = false;
+  let localPath: string | null = null;
 
   try {
-    // Download from cloud storage if needed
-    if (storageType === "cloudinary") {
-      localPath = path.join(
-        process.cwd(),
-        "temp",
-        `${datasetId}-${Date.now()}.tmp`
-      );
-      tempFile = true;
+    // Create temp directory if it doesn't exist
+    const tempDir = path.join(process.cwd(), "temp");
+    await fs.mkdir(tempDir, { recursive: true });
 
-      await fs.mkdir(path.dirname(localPath), { recursive: true });
-      await downloadFromCloudinary(filePath, localPath, "raw");
-      console.log(`📥 Downloaded file from Cloudinary for processing`);
-    }
+    // Determine file extension
+    const ext = path.extname(publicId) || getExtensionFromType(fileType);
+    localPath = path.join(tempDir, `process-${datasetId}-${Date.now()}${ext}`);
+
+    console.log(`📥 Downloading file from Cloudinary for processing...`);
+    console.log(`   Dataset ID: ${datasetId}`);
+    console.log(`   File type: ${fileType}`);
+
+    // Download from Cloudinary
+    await downloadFromCloudinary(fileUrl, localPath, "raw");
+    console.log(`✅ Download complete, starting file processing...`);
 
     let columns: Array<{ name: string; type: string; nullable: boolean }> = [];
     let rowCount = 0;
 
+    // Process based on file type
     switch (fileType) {
       case "csv":
         ({ columns, rowCount } = await processCSV(localPath));
@@ -307,7 +314,7 @@ async function processFileAsync(
         ({ columns, rowCount } = await processExcel(localPath));
         break;
       default:
-        throw new Error("Unsupported file type");
+        throw new Error(`Unsupported file type: ${fileType}`);
     }
 
     // Update dataset with processed data
@@ -318,10 +325,14 @@ async function processFileAsync(
       "metadata.lastModified": new Date(),
     });
 
-    console.log(`✅ File processed successfully: ${datasetId}`);
+    console.log(`✅ File processed successfully`);
+    console.log(`   Dataset ID: ${datasetId}`);
+    console.log(`   Columns: ${columns.length}`);
+    console.log(`   Rows: ${rowCount}`);
   } catch (error) {
-    console.error("File processing error:", error);
+    console.error("❌ File processing failed:", error);
 
+    // Update dataset with error status
     await Dataset.findByIdAndUpdate(datasetId, {
       "metadata.processingStatus": "failed",
       "metadata.errorMessage":
@@ -329,14 +340,37 @@ async function processFileAsync(
       "metadata.lastModified": new Date(),
     });
   } finally {
-    // Clean up temp file
-    if (tempFile && localPath) {
-      await fs.unlink(localPath).catch(console.error);
+    // Always clean up temp file
+    if (localPath) {
+      await fs
+        .unlink(localPath)
+        .then(() =>
+          console.log(`🧹 Cleaned up temp file: ${path.basename(localPath!)}`)
+        )
+        .catch((err) => console.error("Error cleaning up temp file:", err));
     }
   }
 }
 
-// Process CSV file
+/**
+ * Get file extension from file type
+ */
+function getExtensionFromType(fileType: string): string {
+  const extensions: Record<string, string> = {
+    csv: ".csv",
+    json: ".json",
+    excel: ".xlsx",
+  };
+  return extensions[fileType] || ".tmp";
+}
+
+// ============================================
+// File Processing Functions
+// ============================================
+
+/**
+ * Process CSV file
+ */
 async function processCSV(filePath: string): Promise<{
   columns: Array<{ name: string; type: string; nullable: boolean }>;
   rowCount: number;
@@ -370,14 +404,15 @@ async function processCSV(filePath: string): Promise<{
             nullable: types.has("null") || types.has("undefined"),
           })
         );
-
         resolve({ columns: columnInfo, rowCount });
       })
       .on("error", reject);
   });
 }
 
-// Process JSON file
+/**
+ * Process JSON file
+ */
 async function processJSON(filePath: string): Promise<{
   columns: Array<{ name: string; type: string; nullable: boolean }>;
   rowCount: number;
@@ -387,6 +422,7 @@ async function processJSON(filePath: string): Promise<{
 
   let rows: any[] = [];
 
+  // Handle different JSON structures
   if (Array.isArray(data)) {
     rows = data;
   } else if (typeof data === "object" && data !== null) {
@@ -401,6 +437,7 @@ async function processJSON(filePath: string): Promise<{
   const rowCount = rows.length;
   const columns: Map<string, Set<string>> = new Map();
 
+  // Analyze structure
   rows.forEach((row: any) => {
     if (typeof row === "object" && row !== null) {
       Object.keys(row).forEach((key) => {
@@ -422,7 +459,9 @@ async function processJSON(filePath: string): Promise<{
   return { columns: columnInfo, rowCount };
 }
 
-// Process Excel file
+/**
+ * Process Excel file
+ */
 async function processExcel(filePath: string): Promise<{
   columns: Array<{ name: string; type: string; nullable: boolean }>;
   rowCount: number;
@@ -455,35 +494,73 @@ async function processExcel(filePath: string): Promise<{
   return { columns: columnInfo, rowCount };
 }
 
-// Helper functions
+// ============================================
+// Helper Functions
+// ============================================
+
+/**
+ * Detect data type of a value
+ */
 function detectType(value: any): string {
-  if (value === null || value === undefined || value === "") return "null";
-  if (typeof value === "number")
+  if (value === null || value === undefined || value === "") {
+    return "null";
+  }
+
+  if (typeof value === "number") {
     return Number.isInteger(value) ? "integer" : "float";
-  if (typeof value === "boolean") return "boolean";
+  }
+
+  if (typeof value === "boolean") {
+    return "boolean";
+  }
+
   if (typeof value === "string") {
-    if (!isNaN(Date.parse(value))) return "date";
-    if (!isNaN(Number(value))) return "number";
+    // Check if it's a date
+    const dateValue = Date.parse(value);
+    if (!isNaN(dateValue)) {
+      return "date";
+    }
+    // Check if it's a number
+    if (!isNaN(Number(value)) && value.trim() !== "") {
+      return "number";
+    }
     return "string";
   }
-  if (Array.isArray(value)) return "array";
-  if (typeof value === "object") return "object";
+
+  if (Array.isArray(value)) {
+    return "array";
+  }
+
+  if (typeof value === "object") {
+    return "object";
+  }
+
   return "unknown";
 }
 
+/**
+ * Get most common type from array of types
+ */
 function getMostCommonType(types: string[]): string {
   if (types.length === 0) return "unknown";
   if (types.length === 1) return types[0];
 
+  // Remove null from consideration
   const nonNullTypes = types.filter((t) => t !== "null" && t !== "undefined");
+
   if (nonNullTypes.length === 0) return "null";
   if (nonNullTypes.length === 1) return nonNullTypes[0];
 
+  // Count occurrences
   const counts = new Map<string, number>();
-  nonNullTypes.forEach((type) => counts.set(type, (counts.get(type) || 0) + 1));
+  nonNullTypes.forEach((type) => {
+    counts.set(type, (counts.get(type) || 0) + 1);
+  });
 
+  // Return most common
   let maxCount = 0;
   let mostCommon = "string";
+
   counts.forEach((count, type) => {
     if (count > maxCount) {
       maxCount = count;
@@ -494,11 +571,17 @@ function getMostCommonType(types: string[]): string {
   return mostCommon;
 }
 
+/**
+ * Format bytes to human readable string
+ */
 function formatBytes(bytes: number, decimals: number = 2): string {
   if (bytes === 0) return "0 Bytes";
+
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ["Bytes", "KB", "MB", "GB"];
+  const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
+
   const i = Math.floor(Math.log(bytes) / Math.log(k));
+
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i];
 }

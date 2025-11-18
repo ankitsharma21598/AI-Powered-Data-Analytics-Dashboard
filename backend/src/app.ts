@@ -28,6 +28,7 @@ app.use("/api/upload", uploadRoutes);
 // origin for frontend
 const allowedOrigins = [
   "http://localhost:5173",
+  "http://localhost:5174",
   "https://ai-powered-data-analysis-dashboard.vercel.app",
 ];
 

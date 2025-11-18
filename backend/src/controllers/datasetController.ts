@@ -1,10 +1,13 @@
-import { type Response, type NextFunction } from "express";
+import { Response, NextFunction } from "express";
 import Dataset from "../models/Dataset.js";
 import Insight from "../models/Insight.js";
-import { type AuthRequest } from "../middleware/auth.js";
+import { AuthRequest } from "../middleware/auth.js";
 import { CustomError } from "../middleware/errorHandler.js";
 import fs from "fs/promises";
 import path from "path";
+import csv from "csv-parser";
+import { createReadStream } from "fs";
+import * as XLSX from "xlsx";
 
 // @desc    Get all datasets for user
 // @route   GET /api/datasets
@@ -86,7 +89,6 @@ export const getDataset = async (
   }
 };
 
-
 // @desc    Update dataset
 // @route   PUT /api/datasets/:id
 // @access  Private
@@ -150,6 +152,9 @@ export const deleteDataset = async (
     // Delete physical file
     try {
       const filePath = path.join(process.cwd(), dataset.fileUrl);
+
+      console.log("File Path ==>", filePath);
+
       await fs.unlink(filePath);
     } catch (fileError) {
       console.error("Error deleting file:", fileError);
@@ -250,22 +255,69 @@ export const getDatasetPreview = async (
       throw new CustomError("Dataset is still being processed", 400);
     }
 
-    // TODO: Implement actual file reading and preview
-    // For now, return mock data
-    const previewData = {
-      columns: dataset.columns,
-      rows: [
-        // Mock rows - replace with actual data reading
-        { id: 1, sample: "data" },
-        { id: 2, sample: "data" },
-      ],
-      totalRows: dataset.rowCount,
-      previewRows: 10,
-    };
+    const limit = parseInt(req.query.limit as string) || 10;
+    const storageType = (dataset.metadata as any).storageType || "local";
+
+    let filePath: string;
+    let tempFile = false;
+    let localPath: string;
+
+    // Determine file path based on storage type
+    if (storageType === "cloudinary") {
+      const cloudPath = (dataset.metadata as any).cloudPath;
+      if (!cloudPath) {
+        throw new CustomError("Cloud path not found for dataset", 500);
+      }
+
+      // Download from Cloudinary to temp
+      localPath = path.join(
+        process.cwd(),
+        "temp",
+        `preview-${dataset._id}-${Date.now()}${path.extname(dataset.fileName)}`
+      );
+      await fs.mkdir(path.dirname(localPath), { recursive: true });
+
+      const { downloadFromCloudinary } = await import(
+        "../services/cloudinaryService.js"
+      );
+      await downloadFromCloudinary(dataset.fileUrl, localPath, "raw");
+      tempFile = true;
+    } else {
+      // Local storage
+      localPath = path.join(process.cwd(), dataset.fileUrl);
+    }
+
+    // Read and parse file based on type
+    let previewData: any;
+
+    switch (dataset.fileType) {
+      case "csv":
+        previewData = await readCSVPreview(localPath, limit);
+        break;
+      case "json":
+        previewData = await readJSONPreview(localPath, limit);
+        break;
+      case "excel":
+        previewData = await readExcelPreview(localPath, limit);
+        break;
+      default:
+        throw new CustomError("Unsupported file type for preview", 400);
+    }
+
+    // Cleanup temp file
+    if (tempFile) {
+      await fs.unlink(localPath).catch(console.error);
+    }
 
     res.status(200).json({
       success: true,
-      data: previewData,
+      data: {
+        columns: dataset.columns,
+        rows: previewData,
+        totalRows: dataset.rowCount,
+        previewRows: previewData.length,
+        fileType: dataset.fileType,
+      },
     });
   } catch (error) {
     next(error);
@@ -351,7 +403,7 @@ export const duplicateDataset = async (
   }
 };
 
-// Helper function to format bytes
+// Helper function to format bytes to human readable
 function formatBytes(bytes: number, decimals: number = 2): string {
   if (bytes === 0) return "0 Bytes";
 
@@ -362,4 +414,79 @@ function formatBytes(bytes: number, decimals: number = 2): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
 
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i];
+}
+
+// Helper function to read CSV preview
+async function readCSVPreview(filePath: string, limit: number): Promise<any[]> {
+  return new Promise((resolve, reject) => {
+    const rows: any[] = [];
+    let count = 0;
+
+    createReadStream(filePath)
+      .pipe(csv())
+      .on("data", (row: any) => {
+        if (count < limit) {
+          rows.push(row);
+          count++;
+        }
+      })
+      .on("end", () => {
+        resolve(rows);
+      })
+      .on("error", (error) => {
+        reject(error);
+      });
+  });
+}
+
+// Helper function to read JSON preview
+async function readJSONPreview(
+  filePath: string,
+  limit: number
+): Promise<any[]> {
+  try {
+    const fileContent = await fs.readFile(filePath, "utf-8");
+    const data = JSON.parse(fileContent);
+
+    let rows: any[] = [];
+
+    // Handle different JSON structures
+    if (Array.isArray(data)) {
+      rows = data;
+    } else if (typeof data === "object" && data !== null) {
+      const arrayKey = Object.keys(data).find((key) =>
+        Array.isArray(data[key])
+      );
+      if (arrayKey) {
+        rows = data[arrayKey];
+      } else {
+        rows = [data];
+      }
+    }
+
+    // Return limited rows
+    return rows.slice(0, limit);
+  } catch (error) {
+    throw new Error(`Failed to read JSON file: ${error}`);
+  }
+}
+
+// Helper function to read Excel preview
+async function readExcelPreview(
+  filePath: string,
+  limit: number
+): Promise<any[]> {
+  try {
+    const workbook = XLSX.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+
+    // Convert to JSON
+    const data: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+    // Return limited rows
+    return data.slice(0, limit);
+  } catch (error) {
+    throw new Error(`Failed to read Excel file: ${error}`);
+  }
 }

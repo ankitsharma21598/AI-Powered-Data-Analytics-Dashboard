@@ -1,142 +1,200 @@
-import { v2 as cloudinary, UploadApiResponse } from "cloudinary";
-import streamifier from "streamifier";
-import fs from "fs";
-import path from "path";
+import { v2 as cloudinary } from 'cloudinary';
+import fs from 'fs';
+import https from 'https';
+import http from 'http';
+import path from 'path';
 
 // Configure Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-  secure: true,
-});
+if (process.env.CLOUDINARY_CLOUD_NAME && 
+    process.env.CLOUDINARY_API_KEY && 
+    process.env.CLOUDINARY_API_SECRET) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true
+  });
+  console.log('✅ Cloudinary configured successfully');
+} else {
+  console.warn('⚠️  Cloudinary not configured - missing credentials');
+}
 
-const CLOUDINARY_FOLDER =
-  process.env.CLOUDINARY_FOLDER || "ai-analytics-uploads";
+export interface CloudinaryUploadOptions {
+  userId?: string;
+  publicId?: string;
+  folder?: string;
+  resourceType?: 'auto' | 'image' | 'video' | 'raw';
+  tags?: string[];
+}
 
-/**
- * Upload file to Cloudinary from file path
- */
-export async function uploadToCloudinary(
-  filePath: string,
-  options: {
-    folder?: string;
-    resourceType?: "auto" | "image" | "video" | "raw";
-    publicId?: string;
-    userId?: string;
-  } = {}
-): Promise<UploadApiResponse> {
-  try {
-    const {
-      folder = CLOUDINARY_FOLDER,
-      resourceType = "raw", // Use 'raw' for CSV, JSON, Excel files
-      publicId,
-      userId,
-    } = options;
-
-    // Create folder structure: folder/userId/filename
-    const fullFolder = userId ? `${folder}/${userId}` : folder;
-
-    const result = await cloudinary.uploader.upload(filePath, {
-      folder: fullFolder,
-      resource_type: resourceType,
-      public_id: publicId,
-      access_mode: "authenticated", // Requires signed URLs for access
-      tags: ["dataset", "upload"],
-      context: {
-        uploadedAt: new Date().toISOString(),
-      },
-    });
-
-    console.log(`✅ File uploaded to Cloudinary: ${result.public_id}`);
-    return result;
-  } catch (error) {
-    console.error("Cloudinary upload error:", error);
-    throw new Error(`Failed to upload to Cloudinary: ${error}`);
-  }
+export interface CloudinaryUploadResult {
+  public_id: string;
+  secure_url: string;
+  url: string;
+  format: string;
+  resource_type: string;
+  bytes: number;
+  original_filename: string;
 }
 
 /**
- * Upload file to Cloudinary from buffer
+ * Upload file to Cloudinary
  */
-export async function uploadBufferToCloudinary(
-  buffer: Buffer,
-  options: {
-    folder?: string;
-    resourceType?: "auto" | "image" | "video" | "raw";
-    publicId?: string;
-    userId?: string;
-    originalName?: string;
-  } = {}
-): Promise<UploadApiResponse> {
-  return new Promise((resolve, reject) => {
-    const {
-      folder = CLOUDINARY_FOLDER,
-      resourceType = "raw",
-      publicId,
-      userId,
-    } = options;
+export async function uploadToCloudinary(
+  localFilePath: string,
+  options: CloudinaryUploadOptions = {}
+): Promise<CloudinaryUploadResult> {
+  try {
+    if (!isCloudinaryConfigured()) {
+      throw new Error('Cloudinary is not properly configured');
+    }
 
-    const fullFolder = userId ? `${folder}/${userId}` : folder;
+    // Build folder path
+    const folderParts = ['datasets'];
+    if (options.userId) {
+      folderParts.push(options.userId);
+    }
+    if (options.folder) {
+      folderParts.push(options.folder);
+    }
+    const folder = folderParts.join('/');
 
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: fullFolder,
-        resource_type: resourceType,
-        public_id: publicId,
-        access_mode: "authenticated",
-        tags: ["dataset", "upload"],
-      },
-      (error, result) => {
-        if (error) {
-          reject(
-            new Error(`Cloudinary buffer upload failed: ${error.message}`)
-          );
-        } else {
-          console.log(`✅ Buffer uploaded to Cloudinary: ${result?.public_id}`);
-          resolve(result as UploadApiResponse);
-        }
-      }
-    );
+    // Get file extension
+    const ext = path.extname(localFilePath).toLowerCase();
+    
+    // Build public_id with extension for raw files
+    let publicId = options.publicId || `file_${Date.now()}`;
+    if (options.resourceType === 'raw' && !publicId.includes('.')) {
+      publicId = `${publicId}${ext}`;
+    }
 
-    streamifier.createReadStream(buffer).pipe(uploadStream);
-  });
+    const uploadOptions: any = {
+      folder: folder,
+      public_id: publicId,
+      resource_type: options.resourceType || 'auto',
+      use_filename: true,
+      unique_filename: false,
+      overwrite: false
+    };
+
+    if (options.tags && options.tags.length > 0) {
+      uploadOptions.tags = options.tags;
+    }
+
+    console.log(`📤 Uploading to Cloudinary: ${folder}/${publicId}`);
+
+    const result = await cloudinary.uploader.upload(localFilePath, uploadOptions);
+
+    console.log(`✅ Upload successful: ${result.secure_url}`);
+
+    return {
+      public_id: result.public_id,
+      secure_url: result.secure_url,
+      url: result.url,
+      format: result.format,
+      resource_type: result.resource_type,
+      bytes: result.bytes,
+      original_filename: result.original_filename || path.basename(localFilePath)
+    };
+  } catch (error) {
+    console.error('Cloudinary upload error:', error);
+    throw new Error(`Failed to upload to Cloudinary: ${error}`);
+  }
 }
 
 /**
  * Download file from Cloudinary
  */
 export async function downloadFromCloudinary(
-  publicId: string,
+  publicIdOrUrl: string,
   localPath: string,
-  resourceType: "image" | "video" | "raw" = "raw"
+  resourceType: 'image' | 'video' | 'raw' = 'raw'
 ): Promise<void> {
   try {
-    const url = cloudinary.url(publicId, {
-      resource_type: resourceType,
-      type: "authenticated",
-      sign_url: true,
-    });
-
-    // Download using fetch
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to download: ${response.statusText}`);
+    if (!isCloudinaryConfigured()) {
+      throw new Error('Cloudinary is not properly configured');
     }
 
-    const buffer = await response.arrayBuffer();
+    let downloadUrl: string;
+
+    // Check if it's already a URL or a public_id
+    if (publicIdOrUrl.startsWith('http://') || publicIdOrUrl.startsWith('https://')) {
+      downloadUrl = publicIdOrUrl;
+    } else {
+      // Build URL from public_id
+      downloadUrl = cloudinary.url(publicIdOrUrl, {
+        resource_type: resourceType,
+        secure: true,
+        type: 'upload'
+      });
+    }
+
+    console.log(`📥 Downloading from Cloudinary: ${downloadUrl}`);
 
     // Ensure directory exists
-    await fs.promises.mkdir(path.dirname(localPath), { recursive: true });
+    const dir = path.dirname(localPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
 
-    // Write to file
-    await fs.promises.writeFile(localPath, Buffer.from(buffer));
+    // Download file
+    await downloadFile(downloadUrl, localPath);
 
-    console.log(`✅ File downloaded from Cloudinary: ${publicId}`);
+    console.log(`✅ Download successful: ${localPath}`);
   } catch (error) {
-    console.error("Cloudinary download error:", error);
-    throw new Error(`Failed to download from Cloudinary: ${error}`);
+    console.error('Cloudinary download error:', error);
+    throw new Error(`Failed to download: ${error}`);
   }
+}
+
+/**
+ * Helper function to download file from URL
+ */
+function downloadFile(url: string, localPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const protocol = url.startsWith('https') ? https : http;
+    const file = fs.createWriteStream(localPath);
+
+    protocol.get(url, (response) => {
+      // Check for successful response
+      if (response.statusCode === 200) {
+        response.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          resolve();
+        });
+      } else if (response.statusCode === 301 || response.statusCode === 302) {
+        // Handle redirects
+        file.close();
+        fs.unlinkSync(localPath);
+        if (response.headers.location) {
+          downloadFile(response.headers.location, localPath)
+            .then(resolve)
+            .catch(reject);
+        } else {
+          reject(new Error('Redirect without location header'));
+        }
+      } else {
+        file.close();
+        fs.unlinkSync(localPath);
+        reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+      }
+    }).on('error', (err) => {
+      file.close();
+      if (fs.existsSync(localPath)) {
+        fs.unlinkSync(localPath);
+      }
+      reject(err);
+    });
+
+    file.on('error', (err) => {
+      file.close();
+      if (fs.existsSync(localPath)) {
+        fs.unlinkSync(localPath);
+      }
+      reject(err);
+    });
+  });
 }
 
 /**
@@ -144,21 +202,21 @@ export async function downloadFromCloudinary(
  */
 export async function deleteFromCloudinary(
   publicId: string,
-  resourceType: "image" | "video" | "raw" = "raw"
+  resourceType: 'image' | 'video' | 'raw' = 'raw'
 ): Promise<void> {
   try {
-    const result = await cloudinary.uploader.destroy(publicId, {
+    if (!isCloudinaryConfigured()) {
+      throw new Error('Cloudinary is not properly configured');
+    }
+
+    await cloudinary.uploader.destroy(publicId, {
       resource_type: resourceType,
-      invalidate: true,
+      invalidate: true
     });
 
-    if (result.result === "ok" || result.result === "not found") {
-      console.log(`✅ File deleted from Cloudinary: ${publicId}`);
-    } else {
-      throw new Error(`Delete failed: ${result.result}`);
-    }
+    console.log(`✅ File deleted from Cloudinary: ${publicId}`);
   } catch (error) {
-    console.error("Cloudinary delete error:", error);
+    console.error('Cloudinary delete error:', error);
     throw new Error(`Failed to delete from Cloudinary: ${error}`);
   }
 }
@@ -168,40 +226,25 @@ export async function deleteFromCloudinary(
  */
 export async function fileExistsInCloudinary(
   publicId: string,
-  resourceType: "image" | "video" | "raw" = "raw"
+  resourceType: 'image' | 'video' | 'raw' = 'raw'
 ): Promise<boolean> {
   try {
-    await cloudinary.api.resource(publicId, { resource_type: resourceType });
-    return true;
-  } catch (error: any) {
-    if (error.http_code === 404) {
+    if (!isCloudinaryConfigured()) {
       return false;
     }
-    console.error("Cloudinary file check error:", error);
+
+    const result = await cloudinary.api.resource(publicId, {
+      resource_type: resourceType
+    });
+
+    return !!result;
+  } catch (error: any) {
+    if (error.error?.http_code === 404) {
+      return false;
+    }
+    console.error('Cloudinary file check error:', error);
     return false;
   }
-}
-
-/**
- * Generate authenticated/signed URL for private file access
- */
-export function generateCloudinaryUrl(
-  publicId: string,
-  options: {
-    resourceType?: "image" | "video" | "raw";
-    expiresAt?: number; // Unix timestamp
-    transformation?: any;
-  } = {}
-): string {
-  const { resourceType = "raw", expiresAt, transformation } = options;
-
-  return cloudinary.url(publicId, {
-    resource_type: resourceType,
-    type: "authenticated",
-    sign_url: true,
-    expires_at: expiresAt || Math.floor(Date.now() / 1000) + 3600, // 1 hour default
-    transformation,
-  });
 }
 
 /**
@@ -209,28 +252,51 @@ export function generateCloudinaryUrl(
  */
 export async function getFileMetadata(
   publicId: string,
-  resourceType: "image" | "video" | "raw" = "raw"
+  resourceType: 'image' | 'video' | 'raw' = 'raw'
 ): Promise<any> {
   try {
+    if (!isCloudinaryConfigured()) {
+      throw new Error('Cloudinary is not properly configured');
+    }
+
     const result = await cloudinary.api.resource(publicId, {
-      resource_type: resourceType,
+      resource_type: resourceType
     });
 
-    return {
-      publicId: result.public_id,
-      format: result.format,
-      resourceType: result.resource_type,
-      bytes: result.bytes,
-      width: result.width,
-      height: result.height,
-      url: result.secure_url,
-      createdAt: result.created_at,
-      tags: result.tags,
-      folder: result.folder,
-    };
+    return result;
   } catch (error) {
-    console.error("Cloudinary metadata error:", error);
+    console.error('Cloudinary metadata error:', error);
     throw new Error(`Failed to get file metadata: ${error}`);
+  }
+}
+
+/**
+ * Generate signed URL for private file access
+ */
+export function generateSignedUrl(
+  publicId: string,
+  resourceType: 'image' | 'video' | 'raw' = 'raw',
+  expiresIn: number = 3600
+): string {
+  try {
+    if (!isCloudinaryConfigured()) {
+      throw new Error('Cloudinary is not properly configured');
+    }
+
+    const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+
+    const url = cloudinary.url(publicId, {
+      resource_type: resourceType,
+      type: 'authenticated',
+      secure: true,
+      sign_url: true,
+      expires_at: expiresAt
+    });
+
+    return url;
+  } catch (error) {
+    console.error('Cloudinary signed URL error:', error);
+    throw new Error(`Failed to generate signed URL: ${error}`);
   }
 }
 
@@ -239,63 +305,29 @@ export async function getFileMetadata(
  */
 export async function listFiles(
   folder?: string,
-  resourceType: "image" | "video" | "raw" = "raw"
+  resourceType: 'image' | 'video' | 'raw' = 'raw'
 ): Promise<any[]> {
   try {
-    const prefix = folder || CLOUDINARY_FOLDER;
+    if (!isCloudinaryConfigured()) {
+      throw new Error('Cloudinary is not properly configured');
+    }
 
-    const result = await cloudinary.api.resources({
-      type: "upload",
+    const options: any = {
       resource_type: resourceType,
-      prefix: prefix,
-      max_results: 500,
-    });
-
-    return result.resources;
-  } catch (error) {
-    console.error("Cloudinary list files error:", error);
-    throw new Error(`Failed to list files: ${error}`);
-  }
-}
-
-/**
- * Delete files in folder
- */
-export async function deleteFolder(
-  folder: string,
-  resourceType: "image" | "video" | "raw" = "raw"
-): Promise<void> {
-  try {
-    await cloudinary.api.delete_resources_by_prefix(folder, {
-      resource_type: resourceType,
-    });
-
-    console.log(`✅ Folder deleted from Cloudinary: ${folder}`);
-  } catch (error) {
-    console.error("Cloudinary delete folder error:", error);
-    throw new Error(`Failed to delete folder: ${error}`);
-  }
-}
-
-/**
- * Get storage usage stats
- */
-export async function getStorageStats(): Promise<any> {
-  try {
-    const usage = await cloudinary.api.usage();
-
-    return {
-      usedCredits: usage.credits.used_percent,
-      bandwidth: usage.bandwidth,
-      storage: usage.storage,
-      resources: usage.resources,
-      transformations: usage.transformations,
-      plan: usage.plan,
-      lastUpdated: usage.last_updated,
+      type: 'upload',
+      max_results: 500
     };
+
+    if (folder) {
+      options.prefix = folder;
+    }
+
+    const result = await cloudinary.api.resources(options);
+
+    return result.resources || [];
   } catch (error) {
-    console.error("Cloudinary stats error:", error);
-    throw new Error(`Failed to get storage stats: ${error}`);
+    console.error('Cloudinary list files error:', error);
+    throw new Error(`Failed to list files: ${error}`);
   }
 }
 
@@ -304,11 +336,17 @@ export async function getStorageStats(): Promise<any> {
  */
 export async function testCloudinaryConnection(): Promise<boolean> {
   try {
+    if (!isCloudinaryConfigured()) {
+      return false;
+    }
+
+    // Try to get account details
     await cloudinary.api.ping();
-    console.log("✅ Cloudinary connection successful");
+
+    console.log('✅ Cloudinary connection successful');
     return true;
   } catch (error) {
-    console.error("❌ Cloudinary connection failed:", error);
+    console.error('❌ Cloudinary connection failed:', error);
     return false;
   }
 }
@@ -325,27 +363,75 @@ export function isCloudinaryConfigured(): boolean {
 }
 
 /**
- * Extract public ID from Cloudinary URL
+ * Extract public_id from Cloudinary URL
  */
-export function extractPublicId(url: string): string {
-  // Extract public ID from Cloudinary URL
-  // Format: https://res.cloudinary.com/{cloud_name}/raw/upload/v{version}/{public_id}.{format}
-  const match = url.match(/\/v\d+\/(.+?)(\.[^.]+)?$/);
-  return match ? match[1] : "";
+export function extractPublicId(url: string): string | null {
+  try {
+    // Match pattern: https://res.cloudinary.com/cloud_name/resource_type/upload/v123456/path/to/file.ext
+    const match = url.match(/\/upload\/(?:v\d+\/)?(.+?)(?:\.\w+)?$/);
+    if (match && match[1]) {
+      return match[1];
+    }
+    return null;
+  } catch (error) {
+    console.error('Error extracting public_id:', error);
+    return null;
+  }
+}
+
+/**
+ * Get public URL for a file
+ */
+export function getPublicUrl(
+  publicId: string,
+  resourceType: 'image' | 'video' | 'raw' = 'raw'
+): string {
+  return cloudinary.url(publicId, {
+    resource_type: resourceType,
+    secure: true,
+    type: 'upload'
+  });
+}
+
+/**
+ * Get file info from public_id
+ */
+export async function getFileInfo(
+  publicId: string,
+  resourceType: 'image' | 'video' | 'raw' = 'raw'
+): Promise<{
+  exists: boolean;
+  url?: string;
+  size?: number;
+  format?: string;
+  createdAt?: Date;
+}> {
+  try {
+    const metadata = await getFileMetadata(publicId, resourceType);
+    
+    return {
+      exists: true,
+      url: metadata.secure_url,
+      size: metadata.bytes,
+      format: metadata.format,
+      createdAt: new Date(metadata.created_at)
+    };
+  } catch (error) {
+    return { exists: false };
+  }
 }
 
 export default {
   uploadToCloudinary,
-  uploadBufferToCloudinary,
   downloadFromCloudinary,
   deleteFromCloudinary,
   fileExistsInCloudinary,
-  generateCloudinaryUrl,
   getFileMetadata,
+  generateSignedUrl,
   listFiles,
-  deleteFolder,
-  getStorageStats,
   testCloudinaryConnection,
   isCloudinaryConfigured,
   extractPublicId,
+  getPublicUrl,
+  getFileInfo
 };
