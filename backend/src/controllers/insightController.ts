@@ -3,7 +3,8 @@ import Insight from "../models/Insight.js";
 import Dataset from "../models/Dataset.js";
 import { type AuthRequest } from "../middleware/auth.js";
 import { CustomError } from "../middleware/errorHandler.js";
-import OpenAI from "openai";
+import { OpenAI } from "openai";
+
 import dotenv from "dotenv";
 dotenv.config();
 
