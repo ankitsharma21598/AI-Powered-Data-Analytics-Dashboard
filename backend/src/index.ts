@@ -15,6 +15,9 @@ app.use(cors());
 app.use(express.json());
 
 // app.use("/api/scrape", scrapeRoutes)
+app.use("/", (req: Request, res: Response) => {
+  res.send("AI-Powered Data Analytics Dashboard API is running.");
+});
 app.use("/api/user", userRoutes);
 app.use("/api/insights", insightRoutes);
 app.use("/api/datasets", datasetRoutes);
