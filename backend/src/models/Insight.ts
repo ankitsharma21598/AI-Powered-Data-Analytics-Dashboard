@@ -86,7 +86,6 @@ const insightSchema = new Schema<IInsight>(
     aiGenerated: {
       type: Boolean,
       default: false,
-      index: true,
     },
     confidence: {
       type: Number,
