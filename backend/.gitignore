@@ -15,6 +15,10 @@ yarn-error.log*
 dist/
 build/
 
+# Uploads
+uploads/*
+!uploads/.gitkeep
+
 # IDE
 .vscode/
 .idea/
@@ -33,4 +37,7 @@ logs/
 # Testing
 coverage/
 .nyc_output/
-.vercel
+
+# Temporary files
+tmp/
+temp/
