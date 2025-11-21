@@ -3,11 +3,13 @@ import Dataset from "../models/Dataset.js";
 import Insight from "../models/Insight.js";
 import { AuthRequest } from "../middleware/auth.js";
 import { CustomError } from "../middleware/errorHandler.js";
-import fs from "fs/promises";
-import path from "path";
 import csv from "csv-parser";
-import { createReadStream } from "fs";
+import { Readable } from "stream";
 import * as XLSX from "xlsx";
+import {
+  downloadToBuffer,
+  deleteFromCloudinary,
+} from "../services/cloudinaryService.js";
 
 // @desc    Get all datasets for user
 // @route   GET /api/datasets
@@ -22,17 +24,11 @@ export const getDatasets = async (
     const limit = parseInt(req.query.limit as string) || 10;
     const skip = (page - 1) * limit;
 
-    // Filters
     const filter: any = { userId: req.user?._id };
-
-    if (req.query.fileType) {
-      filter.fileType = req.query.fileType;
-    }
-
+    if (req.query.fileType) filter.fileType = req.query.fileType;
     if (req.query.processingStatus) {
       filter["metadata.processingStatus"] = req.query.processingStatus;
     }
-
     if (req.query.search) {
       filter.$or = [
         { name: { $regex: req.query.search, $options: "i" } },
@@ -76,14 +72,9 @@ export const getDataset = async (
       userId: req.user?._id,
     });
 
-    if (!dataset) {
-      throw new CustomError("Dataset not found", 404);
-    }
+    if (!dataset) throw new CustomError("Dataset not found", 404);
 
-    res.status(200).json({
-      success: true,
-      data: dataset,
-    });
+    res.status(200).json({ success: true, data: dataset });
   } catch (error) {
     next(error);
   }
@@ -105,30 +96,22 @@ export const updateDataset = async (
       userId: req.user?._id,
     });
 
-    if (!dataset) {
-      throw new CustomError("Dataset not found", 404);
-    }
+    if (!dataset) throw new CustomError("Dataset not found", 404);
 
-    // Update fields
     if (name !== undefined) dataset.name = name;
     if (description !== undefined) dataset.description = description;
     if (tags !== undefined) dataset.tags = tags;
     if (isPublic !== undefined) dataset.isPublic = isPublic;
-
     dataset.metadata.lastModified = new Date();
 
     await dataset.save();
-
-    res.status(200).json({
-      success: true,
-      data: dataset,
-    });
+    res.status(200).json({ success: true, data: dataset });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Delete dataset and associated file
+// @desc    Delete dataset and Cloudinary file
 // @route   DELETE /api/datasets/:id
 // @access  Private
 export const deleteDataset = async (
@@ -142,31 +125,27 @@ export const deleteDataset = async (
       userId: req.user?._id,
     });
 
-    if (!dataset) {
-      throw new CustomError("Dataset not found", 404);
-    }
+    if (!dataset) throw new CustomError("Dataset not found", 404);
 
     // Delete associated insights
     await Insight.deleteMany({ datasetId: dataset._id });
 
-    // Delete physical file
-    try {
-      const filePath = path.join(process.cwd(), dataset.fileUrl);
-
-      console.log("File Path ==>", filePath);
-
-      await fs.unlink(filePath);
-    } catch (fileError) {
-      console.error("Error deleting file:", fileError);
-      // Continue even if file deletion fails
+    // Delete from Cloudinary
+    const cloudPath = (dataset.metadata as any).cloudPath;
+    if (cloudPath) {
+      try {
+        await deleteFromCloudinary(cloudPath, "raw");
+        console.log(`✅ Deleted from Cloudinary: ${cloudPath}`);
+      } catch (err) {
+        console.error("Error deleting from Cloudinary:", err);
+      }
     }
 
-    // Delete dataset record
     await dataset.deleteOne();
 
     res.status(200).json({
       success: true,
-      message: "Dataset and associated data deleted successfully",
+      message: "Dataset deleted successfully",
     });
   } catch (error) {
     next(error);
@@ -187,53 +166,35 @@ export const getDatasetStats = async (
       userId: req.user?._id,
     });
 
-    if (!dataset) {
-      throw new CustomError("Dataset not found", 404);
-    }
+    if (!dataset) throw new CustomError("Dataset not found", 404);
 
-    // Get insights count for this dataset
-    const insightsCount = await Insight.countDocuments({
-      datasetId: dataset._id,
-    });
-
-    // Calculate column statistics
-    const columnStats = dataset.columns.map((col) => ({
-      name: col.name,
-      type: col.type,
-      nullable: col.nullable,
-      nullCount: 0, // TODO: Calculate from actual data
-      uniqueCount: 0, // TODO: Calculate from actual data
-    }));
-
-    const stats = {
-      basic: {
-        fileName: dataset.fileName,
-        fileSize: dataset.fileSize,
-        fileSizeReadable: formatBytes(dataset.fileSize),
-        fileType: dataset.fileType,
-        rowCount: dataset.rowCount,
-        columnCount: dataset.columns.length,
-        uploadDate: dataset.metadata.uploadDate,
-        lastModified: dataset.metadata.lastModified,
-        processingStatus: dataset.metadata.processingStatus,
-      },
-      columns: columnStats,
-      insights: {
-        total: insightsCount,
-      },
-      tags: dataset.tags,
-    };
+    const insightsCount = await Insight.countDocuments({ datasetId: dataset._id });
 
     res.status(200).json({
       success: true,
-      data: stats,
+      data: {
+        basic: {
+          fileName: dataset.fileName,
+          fileSize: dataset.fileSize,
+          fileSizeReadable: formatBytes(dataset.fileSize),
+          fileType: dataset.fileType,
+          rowCount: dataset.rowCount,
+          columnCount: dataset.columns.length,
+          uploadDate: dataset.metadata.uploadDate,
+          processingStatus: dataset.metadata.processingStatus,
+          storageType: "cloudinary",
+        },
+        columns: dataset.columns,
+        insights: { total: insightsCount },
+        tags: dataset.tags,
+      },
     });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Get dataset preview (first N rows)
+// @desc    Get dataset preview (NO local storage)
 // @route   GET /api/datasets/:id/preview
 // @access  Private
 export const getDatasetPreview = async (
@@ -247,66 +208,31 @@ export const getDatasetPreview = async (
       userId: req.user?._id,
     });
 
-    if (!dataset) {
-      throw new CustomError("Dataset not found", 404);
-    }
-
+    if (!dataset) throw new CustomError("Dataset not found", 404);
     if (dataset.metadata.processingStatus !== "completed") {
       throw new CustomError("Dataset is still being processed", 400);
     }
 
     const limit = parseInt(req.query.limit as string) || 10;
-    const storageType = (dataset.metadata as any).storageType || "local";
 
-    let filePath: string;
-    let tempFile = false;
-    let localPath: string;
+    // Download to buffer (NO local file)
+    console.log(`📥 Fetching preview from Cloudinary...`);
+    const buffer = await downloadToBuffer(dataset.fileUrl);
 
-    // Determine file path based on storage type
-    if (storageType === "cloudinary") {
-      const cloudPath = (dataset.metadata as any).cloudPath;
-      if (!cloudPath) {
-        throw new CustomError("Cloud path not found for dataset", 500);
-      }
-
-      // Download from Cloudinary to temp
-      localPath = path.join(
-        process.cwd(),
-        "temp",
-        `preview-${dataset._id}-${Date.now()}${path.extname(dataset.fileName)}`
-      );
-      await fs.mkdir(path.dirname(localPath), { recursive: true });
-
-      const { downloadFromCloudinary } = await import(
-        "../services/cloudinaryService.js"
-      );
-      await downloadFromCloudinary(dataset.fileUrl, localPath, "raw");
-      tempFile = true;
-    } else {
-      // Local storage
-      localPath = path.join(process.cwd(), dataset.fileUrl);
-    }
-
-    // Read and parse file based on type
-    let previewData: any;
+    let previewData: any[] = [];
 
     switch (dataset.fileType) {
       case "csv":
-        previewData = await readCSVPreview(localPath, limit);
+        previewData = await readCSVPreviewFromBuffer(buffer, limit);
         break;
       case "json":
-        previewData = await readJSONPreview(localPath, limit);
+        previewData = readJSONPreviewFromBuffer(buffer, limit);
         break;
       case "excel":
-        previewData = await readExcelPreview(localPath, limit);
+        previewData = readExcelPreviewFromBuffer(buffer, limit);
         break;
       default:
         throw new CustomError("Unsupported file type for preview", 400);
-    }
-
-    // Cleanup temp file
-    if (tempFile) {
-      await fs.unlink(localPath).catch(console.error);
     }
 
     res.status(200).json({
@@ -324,7 +250,7 @@ export const getDatasetPreview = async (
   }
 };
 
-// @desc    Download dataset
+// @desc    Download dataset (redirect to Cloudinary URL)
 // @route   GET /api/datasets/:id/download
 // @access  Private
 export const downloadDataset = async (
@@ -338,20 +264,10 @@ export const downloadDataset = async (
       userId: req.user?._id,
     });
 
-    if (!dataset) {
-      throw new CustomError("Dataset not found", 404);
-    }
+    if (!dataset) throw new CustomError("Dataset not found", 404);
 
-    const filePath = path.join(process.cwd(), dataset.fileUrl);
-
-    // Check if file exists
-    try {
-      await fs.access(filePath);
-    } catch {
-      throw new CustomError("File not found", 404);
-    }
-
-    res.download(filePath, dataset.fileName);
+    // Redirect to Cloudinary URL for download
+    res.redirect(dataset.fileUrl);
   } catch (error) {
     next(error);
   }
@@ -366,127 +282,83 @@ export const duplicateDataset = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const originalDataset = await Dataset.findOne({
+    const original = await Dataset.findOne({
       _id: req.params.id,
       userId: req.user?._id,
     });
 
-    if (!originalDataset) {
-      throw new CustomError("Dataset not found", 404);
-    }
+    if (!original) throw new CustomError("Dataset not found", 404);
 
-    // Create duplicate
     const duplicate = await Dataset.create({
       userId: req.user?._id,
-      name: `${originalDataset.name} (Copy)`,
-      description: originalDataset.description,
-      fileUrl: originalDataset.fileUrl, // Same file
-      fileName: originalDataset.fileName,
-      fileSize: originalDataset.fileSize,
-      fileType: originalDataset.fileType,
-      columns: originalDataset.columns,
-      rowCount: originalDataset.rowCount,
-      tags: originalDataset.tags,
+      name: `${original.name} (Copy)`,
+      description: original.description,
+      fileUrl: original.fileUrl, // Same Cloudinary URL
+      fileName: original.fileName,
+      fileSize: original.fileSize,
+      fileType: original.fileType,
+      columns: original.columns,
+      rowCount: original.rowCount,
+      tags: original.tags,
       metadata: {
         uploadDate: new Date(),
         lastModified: new Date(),
-        processingStatus: originalDataset.metadata.processingStatus,
+        processingStatus: original.metadata.processingStatus,
+        storageType: "cloudinary",
+        cloudPath: (original.metadata as any).cloudPath,
       },
     });
 
-    res.status(201).json({
-      success: true,
-      data: duplicate,
-    });
+    res.status(201).json({ success: true, data: duplicate });
   } catch (error) {
     next(error);
   }
 };
 
-// Helper function to format bytes to human readable
-function formatBytes(bytes: number, decimals: number = 2): string {
-  if (bytes === 0) return "0 Bytes";
+// ============================================
+// Buffer Preview Functions (NO local storage)
+// ============================================
 
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
-
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i];
-}
-
-// Helper function to read CSV preview
-async function readCSVPreview(filePath: string, limit: number): Promise<any[]> {
+async function readCSVPreviewFromBuffer(buffer: Buffer, limit: number): Promise<any[]> {
   return new Promise((resolve, reject) => {
     const rows: any[] = [];
     let count = 0;
 
-    createReadStream(filePath)
+    Readable.from(buffer)
       .pipe(csv())
       .on("data", (row: any) => {
-        if (count < limit) {
-          rows.push(row);
-          count++;
-        }
+        if (count < limit) { rows.push(row); count++; }
       })
-      .on("end", () => {
-        resolve(rows);
-      })
-      .on("error", (error) => {
-        reject(error);
-      });
+      .on("end", () => resolve(rows))
+      .on("error", reject);
   });
 }
 
-// Helper function to read JSON preview
-async function readJSONPreview(
-  filePath: string,
-  limit: number
-): Promise<any[]> {
-  try {
-    const fileContent = await fs.readFile(filePath, "utf-8");
-    const data = JSON.parse(fileContent);
+function readJSONPreviewFromBuffer(buffer: Buffer, limit: number): any[] {
+  const data = JSON.parse(buffer.toString("utf-8"));
+  let rows: any[] = [];
 
-    let rows: any[] = [];
-
-    // Handle different JSON structures
-    if (Array.isArray(data)) {
-      rows = data;
-    } else if (typeof data === "object" && data !== null) {
-      const arrayKey = Object.keys(data).find((key) =>
-        Array.isArray(data[key])
-      );
-      if (arrayKey) {
-        rows = data[arrayKey];
-      } else {
-        rows = [data];
-      }
-    }
-
-    // Return limited rows
-    return rows.slice(0, limit);
-  } catch (error) {
-    throw new Error(`Failed to read JSON file: ${error}`);
+  if (Array.isArray(data)) {
+    rows = data;
+  } else if (typeof data === "object" && data !== null) {
+    const arrayKey = Object.keys(data).find((k) => Array.isArray(data[k]));
+    rows = arrayKey ? data[arrayKey] : [data];
   }
+
+  return rows.slice(0, limit);
 }
 
-// Helper function to read Excel preview
-async function readExcelPreview(
-  filePath: string,
-  limit: number
-): Promise<any[]> {
-  try {
-    const workbook = XLSX.readFile(filePath);
-    const sheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[sheetName];
+function readExcelPreviewFromBuffer(buffer: Buffer, limit: number): any[] {
+  const workbook = XLSX.read(buffer, { type: "buffer" });
+  const sheetName = workbook.SheetNames[0];
+  const data: any[] = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+  return data.slice(0, limit);
+}
 
-    // Convert to JSON
-    const data: any[] = XLSX.utils.sheet_to_json(worksheet);
-
-    // Return limited rows
-    return data.slice(0, limit);
-  } catch (error) {
-    throw new Error(`Failed to read Excel file: ${error}`);
-  }
+function formatBytes(bytes: number, decimals = 2): string {
+  if (bytes === 0) return "0 Bytes";
+  const k = 1024, dm = decimals < 0 ? 0 : decimals;
+  const sizes = ["Bytes", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + " " + sizes[i];
 }
