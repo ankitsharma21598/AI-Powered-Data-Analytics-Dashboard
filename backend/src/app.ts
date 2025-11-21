@@ -14,23 +14,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req: Request, res: Response) => {
-  console.log("Inside test route.......");
-
-  res.send("Hello World!");
-});
 // app.use("/api/scrape", scrapeRoutes)
 app.use("/api/user", userRoutes);
 app.use("/api/insights", insightRoutes);
 app.use("/api/datasets", datasetRoutes);
 app.use("/api/upload", uploadRoutes);
-
-// origin for frontend
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "https://ai-powered-data-analysis-dashboard.vercel.app",
-];
 
 
 export default app;
