@@ -5,7 +5,7 @@ import { type Request } from "express";
 import { CustomError } from "./errorHandler.js";
 
 // Ensure uploads directory exists
-const uploadDir = process.env.UPLOAD_PATH || "./uploads";
+const uploadDir = process.env.UPLOAD_PATH || "./tmp/uploads";
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -297,7 +297,7 @@ function formatBytes(bytes: number, decimals: number = 2): string {
 
 // Clean up old files (can be used in cron job)
 export const cleanupOldFiles = (daysOld: number = 30): void => {
-  const uploadPath = process.env.UPLOAD_PATH || "./uploads";
+  const uploadPath = process.env.UPLOAD_PATH || "./tmp/uploads";
 
   if (!fs.existsSync(uploadPath)) {
     return;
